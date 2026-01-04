@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { TimeFormatItem } from '../types';
+import { TimeFormatItem } from '../types.ts';
 import { Plus, Trash2, Clock, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
-import { validateTimeFormat } from '../constants';
+import { validateTimeFormat } from '../constants.ts';
 
 interface TimeFormatLibraryProps {
   formats: TimeFormatItem[];

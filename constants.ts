@@ -1,4 +1,4 @@
-import { TimeFormatItem, AddressLibraryItem } from './types';
+import { TimeFormatItem, AddressLibraryItem } from './types.ts';
 
 export const INITIAL_TIME_FORMATS: TimeFormatItem[] = [
   { id: '1', name: 'X月X日', pattern: '^\\d{1,2}月\\d{1,2}日$', isSystem: true },

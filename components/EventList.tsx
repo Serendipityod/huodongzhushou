@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { AppEvent, SelectionState } from '../types';
+import { AppEvent, SelectionState } from '../types.ts';
 import { Trash2, Clock } from 'lucide-react';
 
 interface EventListProps {

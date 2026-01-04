@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { AppEvent, AddressLibraryItem, TimeFormatItem, ViewState, SelectionState } from './types';
-import { EventList } from './components/EventList';
-import { AddressLibrary } from './components/AddressLibrary';
-import { TimeFormatLibrary } from './components/TimeFormatLibrary';
-import { ImportPanel } from './components/ImportPanel';
-import { IssueSidebar } from './components/IssueSidebar';
-import { validateTimeFormat, INITIAL_TIME_FORMATS } from './constants';
+import { AppEvent, AddressLibraryItem, TimeFormatItem, ViewState, SelectionState } from './types.ts';
+import { EventList } from './components/EventList.tsx';
+import { AddressLibrary } from './components/AddressLibrary.tsx';
+import { TimeFormatLibrary } from './components/TimeFormatLibrary.tsx';
+import { ImportPanel } from './components/ImportPanel.tsx';
+import { IssueSidebar } from './components/IssueSidebar.tsx';
+import { validateTimeFormat, INITIAL_TIME_FORMATS } from './constants.ts';
 import { LayoutDashboard, Clock, ChevronDown, ChevronUp, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 

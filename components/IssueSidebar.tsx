@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { AppEvent, AddressLibraryItem, SelectionState } from '../types';
+import { AppEvent, AddressLibraryItem, SelectionState } from '../types.ts';
 import { ListOrdered, MapPin, Clock, Check, Plus, AlertCircle, Wand2, EyeOff, RotateCcw, Lightbulb, FilePlus } from 'lucide-react';
-import { getRecommendedTime, getRecommendedLocation, generateRegexFromTime } from '../constants';
+import { getRecommendedTime, getRecommendedLocation, generateRegexFromTime } from '../constants.ts';
 
 interface IssueSidebarProps {
   events: AppEvent[];

@@ -10,7 +10,15 @@
       window.process = window.process || {};
       window.process.env = window.process.env || {};
       window.process.env.NODE_ENV = window.process.env.NODE_ENV || 'development';
+      
+      // CORS check alert
+      if (window.location.protocol === 'file:') {
+         console.warn("Detected file:// protocol. Modules will likely fail due to CORS.");
+         // We won't alert to avoid annoyance, but keep in mind imports fail on file://
+      }
     </script>
+    <!-- Add Babel for in-browser compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script type="importmap">
 {
   "imports": {
@@ -28,6 +36,7 @@
 </head>
   <body class="bg-gray-50 text-gray-900 font-sans antialiased">
     <div id="root"></div>
-    <script type="module" src="./index.tsx"></script>
+    <!-- Changed to text/babel and explicit file extension -->
+    <script type="text/babel" data-type="module" src="./index.tsx"></script>
   </body>
 </html>

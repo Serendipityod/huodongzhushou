@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { TimeFormatItem } from '../types';
+import { TimeFormatItem } from '../types.ts';
 import { Upload, FileSpreadsheet, Info, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 

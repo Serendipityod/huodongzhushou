@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { AddressLibraryItem } from '../types';
+import { AddressLibraryItem } from '../types.ts';
 import { Plus, Trash2, MapPin } from 'lucide-react';
 
 interface AddressLibraryProps {
