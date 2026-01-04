@@ -1,0 +1,5 @@
+{
+  "name": "Event Master Validator",
+  "description": "An event management tool supporting manual entry and Excel import with strict time format validation and address library verification.",
+  "requestFramePermissions": []
+}
