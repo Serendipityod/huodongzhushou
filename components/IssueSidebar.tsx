@@ -43,7 +43,7 @@ export const IssueSidebar: React.FC<IssueSidebarProps> = ({
   const pendingLocationIssues = events.filter(e => !e.isLocationValid && !e.ignoredErrors?.includes('location'));
   
   // Group Pending Locations
-  const uniqueInvalidLocations = Array.from(new Set(pendingLocationIssues.map(e => e.location))).filter(l => !!l);
+  const uniqueInvalidLocations: string[] = Array.from(new Set(pendingLocationIssues.map(e => e.location))).filter(l => !!l);
 
   // Ignored Issues
   const ignoredSerialIssues = events.filter(e => e.serialNo !== String(events.indexOf(e) + 1) && e.ignoredErrors?.includes('serial'));
