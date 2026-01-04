@@ -1,42 +1,716 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
+<html lang="zh-CN">
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Event Master Validator</title>
+    <title>活动数据校验助手 (离线版)</title>
+    
+    <!-- 
+      === 离线运行说明 ===
+      为了在无网络环境下运行，请下载以下文件并放入 index.html 同级的 lib 文件夹中：
+      1. react.development.js: https://unpkg.com/react@18/umd/react.development.js
+      2. react-dom.development.js: https://unpkg.com/react-dom@18/umd/react-dom.development.js
+      3. babel.min.js: https://unpkg.com/@babel/standalone/babel.min.js
+      4. xlsx.full.min.js: https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js
+      5. tailwindcss.js: 打开 https://cdn.tailwindcss.com 另存为 lib/tailwindcss.js
+    -->
+
+    <!-- 尝试加载本地库，如果失败(有网络时)可回退到 CDN (需自行修改 src) -->
+    <!-- 这里配置为优先使用 CDN 以便你复制即用，离线时请修改 src 指向本地 lib/ -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-      // Global process shim
-      window.process = window.process || {};
-      window.process.env = window.process.env || {};
-      window.process.env.NODE_ENV = window.process.env.NODE_ENV || 'development';
-      
-      // CORS check alert
-      if (window.location.protocol === 'file:') {
-         console.warn("Detected file:// protocol. Modules will likely fail due to CORS.");
-         // We won't alert to avoid annoyance, but keep in mind imports fail on file://
-      }
-    </script>
-    <!-- Add Babel for in-browser compilation -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script type="importmap">
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+
+    <style>
+      /* 简单的加载动画样式，防止Tailwind加载延迟 */
+      body { visibility: visible; }
+      .icon { width: 1.25rem; height: 1.25rem; display: inline-block; vertical-align: middle; }
+    </style>
+<script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.2.0",
-    "react/": "https://esm.sh/react@18.2.0/",
-    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
-    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
-    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client?deps=react@18.2.0,react-dom@18.2.0",
-    "lucide-react": "https://esm.sh/lucide-react@0.294.0?deps=react@18.2.0",
-    "xlsx": "https://esm.sh/xlsx@0.18.5",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0"
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "xlsx": "https://esm.sh/xlsx@^0.18.5"
   }
 }
 </script>
 </head>
-  <body class="bg-gray-50 text-gray-900 font-sans antialiased">
+<body class="bg-gray-50 text-gray-900 font-sans antialiased">
     <div id="root"></div>
-    <!-- Changed to text/babel and explicit file extension -->
-    <script type="text/babel" data-type="module" src="./index.tsx"></script>
-  </body>
+
+    <!-- 主程序逻辑 -->
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+      
+      // --- ICONS (手动定义 SVG 以避免依赖外部图标库文件) ---
+      const Icons = {
+        LayoutDashboard: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>,
+        Clock: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+        ChevronDown: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m6 9 6 6 6-6"/></svg>,
+        ChevronUp: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m18 15-6-6-6 6"/></svg>,
+        Download: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>,
+        Trash2: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>,
+        MapPin: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>,
+        Plus: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M5 12h14"/><path d="M12 5v14"/></svg>,
+        PlayCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>,
+        CheckCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>,
+        XCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>,
+        Upload: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>,
+        FileSpreadsheet: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M8 13h2"/><path d="M14 13h2"/><path d="M8 17h2"/><path d="M14 17h2"/></svg>,
+        Info: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>,
+        AlertTriangle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>,
+        ListOrdered: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>,
+        Check: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><polyline points="20 6 9 17 4 12"/></svg>,
+        AlertCircle: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>,
+        Wand2: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="m19 2 2 2-2 2-2-2 2-2Z"/><path d="m8 2 2 2-2 2-2-2 2-2Z"/><path d="m3 7 2 2-2 2-2-2 2-2Z"/><path d="m21 21-4.3-4.3"/><path d="M11 11c2.5-2.5 5.2-1.6 7 0l2 2-11 11-2-2c-1.6-1.8-2.5-4.5 0-7Z"/></svg>,
+        EyeOff: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7c.44 0 .87-.03 1.28-.09"/><line x1="2" x2="22" y1="2" y2="22"/></svg>,
+        RotateCcw: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>,
+        Lightbulb: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-1 1.5-2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>,
+        FilePlus: (props) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 15h6"/><path d="M12 12v6"/></svg>,
+      };
+
+      // --- CONSTANTS & HELPERS ---
+      
+      const INITIAL_TIME_FORMATS = [
+        { id: '1', name: 'X月X日', pattern: '^\\d{1,2}月\\d{1,2}日$', isSystem: true },
+        { id: '2', name: 'X月X日-X月X日', pattern: '^\\d{1,2}月\\d{1,2}日[-\\s]+\\d{1,2}月\\d{1,2}日$', isSystem: true },
+        { id: '3', name: 'X月', pattern: '^\\d{1,2}月$', isSystem: true },
+        { id: '4', name: 'X月上旬/中旬/下旬', pattern: '^\\d{1,2}月[上中下]旬$', isSystem: true },
+        { id: '5', name: '每周固定时间', pattern: '^每周[一二三四五六日、\\s]+\\d{1,2}:\\d{2}-\\d{1,2}:\\d{2}$', isSystem: true },
+        { id: '6', name: '多日期(顿号/空格分隔)', pattern: '^\\d{1,2}月\\d{1,2}日([、\\s]+\\d{1,2}月\\d{1,2}日)*$', isSystem: true },
+        { id: '7', name: 'X月-X月', pattern: '^\\d{1,2}月-\\d{1,2}月$', isSystem: true },
+        { id: '8', name: '全年', pattern: '^全年$', isSystem: true },
+        { id: '9', name: 'X年X月X日-X年X月X日', pattern: '^\\d{4}年\\d{1,2}月\\d{1,2}日[-\\s]+\\d{4}年\\d{1,2}月\\d{1,2}日$', isSystem: true },
+        { id: '10', name: 'X年X月X日', pattern: '^\\d{4}年\\d{1,2}月\\d{1,2}日$', isSystem: true },
+      ];
+
+      const checkLogicalValidity = (str) => {
+        const dates = [];
+        const dateRegex = /(\d{1,2})\s*[月\.\/-]\s*(\d{1,2})\s*[日]?/g;
+        let match;
+        let tempStr = str;
+        while ((match = dateRegex.exec(tempStr)) !== null) {
+          dates.push({ m: parseInt(match[1]), d: parseInt(match[2]) });
+        }
+        if (dates.length === 0) return null;
+        const daysInMonth = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        for (const date of dates) {
+            if (date.m < 1 || date.m > 12) return `月份 ${date.m} 无效 (需1-12)`;
+            if (date.d < 1 || date.d > daysInMonth[date.m]) return `${date.m}月只有${daysInMonth[date.m]}天，无法设置为${date.d}日`;
+        }
+        if (dates.length === 2 && /[-至]/.test(str)) {
+          const start = dates[0];
+          const end = dates[1];
+          const v1 = start.m * 100 + start.d;
+          const v2 = end.m * 100 + end.d;
+          if (start.m === 12 && end.m === 1) return null;
+          if (v1 > v2) {
+            if (/\d{4}年/.test(str)) return null; 
+            return "结束时间不能早于开始时间";
+          }
+        }
+        return null;
+      };
+
+      const validateTimeFormat = (timeStr, formats) => {
+        if (!timeStr) return { isValid: false, message: "时间不能为空" };
+        const cleanStr = timeStr.replace(/(\(.*?\)|（.*?）)/g, '').trim();
+        const isFormatMatch = formats.some(fmt => {
+          try {
+            const regex = new RegExp(fmt.pattern);
+            return regex.test(cleanStr);
+          } catch (e) {
+            return false;
+          }
+        });
+        if (!isFormatMatch) return { isValid: false, message: "格式不符合任何已知规则 (如: X月X日)" };
+        const logicError = checkLogicalValidity(cleanStr);
+        if (logicError) return { isValid: false, message: logicError };
+        return { isValid: true };
+      };
+
+      const getRecommendedTime = (input) => {
+        if (!input) return null;
+        const cleanInput = input.trim();
+        if (/^\d{1,2}\.\d{1,2}$/.test(cleanInput)) return cleanInput.replace('.', '月') + '日';
+        if (/^\d{1,2}\.\d{1,2}-\d{1,2}\.\d{1,2}$/.test(cleanInput)) return cleanInput.replace(/\./g, '月').replace('-', '日-') + '日';
+        const yyyymmdd = cleanInput.match(/^(\d{4})[-.](\d{1,2})[-.](\d{1,2})$/);
+        if (yyyymmdd) return `${Number(yyyymmdd[2])}月${Number(yyyymmdd[3])}日`;
+        if (/^\d{1,2}\/\d{1,2}$/.test(cleanInput)) return cleanInput.replace('/', '月') + '日';
+        return null;
+      };
+
+      const getRecommendedLocation = (input, library) => {
+        if (!input) return null;
+        const clean = input.trim();
+        const containerMatch = library.find(item => item.name.includes(clean));
+        if (containerMatch) return containerMatch.name;
+        const containedMatch = library.find(item => clean.includes(item.name));
+        if (containedMatch) return containedMatch.name;
+        return null;
+      }
+
+      const generateRegexFromTime = (input) => {
+          const cleaned = input.replace(/(\(.*?\)|（.*?）)/g, '').trim();
+          let escaped = cleaned.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          let pattern = escaped.replace(/\d+/g, (match) => {
+              if (match.length === 4) return '\\d{4}';
+              return '\\d{1,2}';
+          });
+          return `^${pattern}$`;
+      };
+
+      // --- COMPONENTS ---
+
+      const EventList = ({ events, onDelete, onClearAll, onUpdateEvent, onSelectRow, selection }) => {
+        useEffect(() => {
+          if (selection?.source === 'sidebar' && selection.id) {
+            const el = document.getElementById(`event-row-${selection.id}`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, [selection]);
+
+        if (events.length === 0) {
+          return (
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-lg shadow-sm border border-gray-200">
+              <div className="bg-gray-100 p-4 rounded-full mb-4">
+                <Icons.Clock className="w-8 h-8 text-gray-400" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900">暂无活动数据</h3>
+              <p className="text-gray-500 mt-1">请通过 Excel 导入添加活动</p>
+            </div>
+          );
+        }
+
+        return (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-gray-800">活动列表 ({events.length})</h2>
+              <button onClick={onClearAll} className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded border border-red-200 transition-colors">清空列表</button>
+            </div>
+            <div className="overflow-x-auto bg-white rounded-lg shadow border border-gray-200">
+              <table className="min-w-full divide-y divide-gray-200 table-fixed">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-[10%]">序号</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[35%]">活动名称</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[25%]">时间</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-[20%]">地点</th>
+                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-[10%]">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {events.map((event, index) => {
+                    const expectedSerial = (index + 1).toString();
+                    const isSerialValid = event.serialNo === expectedSerial;
+                    const isSerialIgnored = event.ignoredErrors?.includes('serial');
+                    const isTimeIgnored = event.ignoredErrors?.includes('time');
+                    const isLocationIgnored = event.ignoredErrors?.includes('location');
+                    const hasSerialError = !isSerialValid && !isSerialIgnored;
+                    const hasTimeError = !event.isTimeValid && !isTimeIgnored;
+                    const hasLocationError = !event.isLocationValid && !isLocationIgnored;
+                    const hasAnyError = hasSerialError || hasTimeError || hasLocationError;
+                    const isSelected = selection?.id === event.id;
+                    return (
+                      <tr key={event.id} id={`event-row-${event.id}`} onClick={() => onSelectRow && onSelectRow(event.id, 'table')}
+                        className={`transition-colors cursor-pointer ${isSelected ? 'bg-indigo-50 ring-1 ring-inset ring-indigo-300' : hasAnyError ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'}`}>
+                        <td className="px-2 py-3 align-top text-center">
+                          <input type="text" value={event.serialNo} onClick={(e) => { e.stopPropagation(); onSelectRow?.(event.id, 'table', 'serial'); }} onChange={(e) => onUpdateEvent(event.id, 'serialNo', e.target.value)}
+                            className={`w-full text-center bg-transparent border-b border-transparent focus:border-indigo-500 focus:ring-0 text-sm font-medium cursor-pointer ${hasSerialError ? 'text-red-600 font-bold' : 'text-gray-500'}`} />
+                        </td>
+                        <td className="px-2 py-3 align-top">
+                          <input type="text" value={event.name} onChange={(e) => onUpdateEvent(event.id, 'name', e.target.value)} className="w-full bg-transparent border-b border-transparent focus:border-indigo-500 focus:ring-0 text-sm font-medium text-gray-900" />
+                        </td>
+                        <td className="px-2 py-3 align-top">
+                          <input type="text" value={event.time} onClick={(e) => { e.stopPropagation(); onSelectRow?.(event.id, 'table', 'time'); }} onChange={(e) => onUpdateEvent(event.id, 'time', e.target.value)}
+                            className={`w-full bg-transparent border-b border-transparent focus:border-indigo-500 focus:ring-0 text-sm cursor-pointer ${hasTimeError ? 'text-red-600 font-bold' : 'text-gray-500'}`} />
+                        </td>
+                        <td className="px-2 py-3 align-top">
+                           <input type="text" value={event.location} onClick={(e) => { e.stopPropagation(); onSelectRow?.(event.id, 'table', 'location'); }} onChange={(e) => onUpdateEvent(event.id, 'location', e.target.value)}
+                            className={`w-full bg-transparent border-b border-transparent focus:border-indigo-500 focus:ring-0 text-sm cursor-pointer ${hasLocationError ? 'text-red-600 font-bold' : 'text-gray-500'}`} />
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium align-top">
+                          <button onClick={(e) => { e.stopPropagation(); onDelete(event.id); }} className="text-gray-400 hover:text-red-600 transition-colors" title="删除"><Icons.Trash2 className="w-5 h-5" /></button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      };
+
+      const AddressLibrary = ({ locations, onAddLocation, onRemoveLocation }) => {
+        const [newLocation, setNewLocation] = useState('');
+        const handleSubmit = (e) => {
+          e.preventDefault();
+          if (newLocation.trim()) {
+            onAddLocation(newLocation.trim());
+            setNewLocation('');
+          }
+        };
+        return (
+          <div className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center mb-6">
+              <div className="bg-blue-100 p-2 rounded-lg mr-3"><Icons.MapPin className="w-6 h-6 text-blue-600" /></div>
+              <div><h2 className="text-xl font-bold text-gray-900">地址库管理</h2><p className="text-sm text-gray-500">在此维护合法的活动地点。</p></div>
+            </div>
+            <form onSubmit={handleSubmit} className="flex gap-2 mb-6">
+              <input type="text" value={newLocation} onChange={(e) => setNewLocation(e.target.value)} placeholder="输入新地址..." className="flex-1 rounded-md border-gray-300 shadow-sm border px-4 py-2 focus:ring-blue-500 bg-white" />
+              <button type="submit" disabled={!newLocation.trim()} className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"><Icons.Plus className="w-4 h-4 mr-2" />添加地址</button>
+            </form>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {locations.map((loc) => (
+                <div key={loc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-md border border-gray-200 group hover:border-blue-300 transition-colors">
+                  <span className="text-sm font-medium text-gray-700 truncate mr-2" title={loc.name}>{loc.name}</span>
+                  <button onClick={() => onRemoveLocation(loc.id)} className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"><Icons.Trash2 className="w-4 h-4" /></button>
+                </div>
+              ))}
+              {locations.length === 0 && <div className="col-span-full text-center py-8 text-gray-400 text-sm">地址库为空，请添加常用地址。</div>}
+            </div>
+          </div>
+        );
+      };
+
+      const TimeFormatLibrary = ({ formats, onAddFormat, onRemoveFormat }) => {
+        const [newFormat, setNewFormat] = useState({ name: '', pattern: '' });
+        const [testValue, setTestValue] = useState('');
+        const handleSubmit = (e) => {
+          e.preventDefault();
+          if (newFormat.name.trim() && newFormat.pattern.trim()) {
+            try {
+              new RegExp(newFormat.pattern);
+              onAddFormat(newFormat.name.trim(), newFormat.pattern.trim());
+              setNewFormat({ name: '', pattern: '' });
+            } catch (err) { alert('正则表达式格式不正确'); }
+          }
+        };
+        const validationResult = validateTimeFormat(testValue, formats);
+        const isTestValid = validationResult.isValid;
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-6">
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-6"><div className="bg-orange-100 p-2 rounded-lg mr-3"><Icons.Clock className="w-6 h-6 text-orange-600" /></div><div><h2 className="text-xl font-bold text-gray-900">时间格式管理</h2><p className="text-sm text-gray-500">定义系统允许的时间文本格式 (Regex)。</p></div></div>
+                <div className="space-y-3">
+                  {formats.map((fmt) => (
+                    <div key={fmt.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-200 group">
+                      <div className="flex-1 min-w-0 mr-4"><div className="flex items-center"><h3 className="text-sm font-medium text-gray-900">{fmt.name}</h3>{fmt.isSystem && <span className="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-gray-200 text-gray-600">系统预设</span>}</div><p className="text-xs text-gray-500 font-mono mt-1 truncate" title={fmt.pattern}>{fmt.pattern}</p></div>
+                      {!fmt.isSystem && <button onClick={() => onRemoveFormat(fmt.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"><Icons.Trash2 className="w-5 h-5" /></button>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg shadow p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-4">添加新格式</h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">格式名称</label><input type="text" required className="w-full rounded-md border-gray-300 shadow-sm border px-3 py-2 focus:ring-orange-500 bg-white" value={newFormat.name} onChange={(e) => setNewFormat({ ...newFormat, name: e.target.value })} placeholder="例如：全数字日期" /></div>
+                  <div><label className="block text-sm font-medium text-gray-700 mb-1">正则表达式 (Regex)</label><input type="text" required className="w-full rounded-md border-gray-300 shadow-sm border px-3 py-2 focus:ring-orange-500 bg-white font-mono text-sm" value={newFormat.pattern} onChange={(e) => setNewFormat({ ...newFormat, pattern: e.target.value })} placeholder="例如：^\d{4}年$" /></div>
+                  <button type="submit" className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-orange-600 hover:bg-orange-700 transition-colors"><Icons.Plus className="w-4 h-4 mr-2" /> 添加规则</button>
+                </form>
+              </div>
+              <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-4"><Icons.PlayCircle className="w-5 h-5 text-gray-400 mr-2" /><h3 className="text-lg font-bold text-gray-900">校验测试</h3></div>
+                <div className="space-y-4">
+                  <input type="text" className="w-full rounded-md border-gray-300 shadow-sm border px-3 py-2 focus:ring-indigo-500 bg-white" value={testValue} onChange={(e) => setTestValue(e.target.value)} placeholder="输入时间文本测试..." />
+                  {testValue && (
+                    <div className={`flex flex-col p-3 rounded-md ${isTestValid ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                      <div className="flex items-center">{isTestValid ? <><Icons.CheckCircle className="w-5 h-5 mr-2" /><span className="text-sm font-medium">格式匹配成功</span></> : <><Icons.XCircle className="w-5 h-5 mr-2" /><span className="text-sm font-medium">格式不匹配</span></>}</div>
+                      {!isTestValid && validationResult.message && <span className="text-xs mt-1 ml-7 opacity-80">{validationResult.message}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const ImportPanel = ({ timeFormats, onImportExcel }) => {
+        const fileInputRef = useRef(null);
+        const handleFileUpload = (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            try {
+              const arrayBuffer = evt.target?.result;
+              const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
+              const wsname = wb.SheetNames[0];
+              const ws = wb.Sheets[wsname];
+              const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+              const processedData = data.map(row => {
+                if (Array.isArray(row)) {
+                  return row.map(cell => {
+                    if (cell instanceof Date && !isNaN(cell.getTime())) {
+                      return `${cell.getMonth() + 1}月${cell.getDate()}日`;
+                    }
+                    return cell;
+                  });
+                }
+                return row;
+              });
+              if (processedData.length > 0) onImportExcel(processedData);
+            } catch (error) { alert("Excel 解析失败"); }
+            if (fileInputRef.current) fileInputRef.current.value = '';
+          };
+          reader.readAsArrayBuffer(file);
+        };
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-white rounded-lg shadow p-6">
+                <div className="flex items-center mb-6"><div className="bg-green-100 p-2 rounded-lg mr-3"><Icons.FileSpreadsheet className="w-6 h-6 text-green-600" /></div><h2 className="text-xl font-bold text-gray-900">Excel 导入</h2></div>
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6 text-sm text-gray-600"><p className="font-semibold mb-2 flex items-center"><Icons.Info className="w-4 h-4 mr-1"/> 导入说明</p><p className="mb-2">请上传 .xlsx 或 .xls 文件。</p><p>如果未包含序号列，系统将自动生成。</p></div>
+                <div className="flex justify-center px-6 pt-10 pb-10 border-2 border-gray-300 border-dashed rounded-md hover:border-green-500 transition-colors cursor-pointer bg-gray-50 hover:bg-green-50" onClick={() => fileInputRef.current?.click()}>
+                  <div className="space-y-2 text-center"><Icons.Upload className="mx-auto h-12 w-12 text-gray-400" /><div className="flex text-sm text-gray-600 justify-center"><label className="relative cursor-pointer rounded-md font-medium text-green-600 hover:text-green-500"><span>点击上传文件</span></label><p className="pl-1">或拖拽至此</p></div><p className="text-xs text-gray-500">支持 XLSX, XLS</p></div>
+                  <input ref={fileInputRef} type="file" className="sr-only" accept=".xlsx, .xls" onChange={handleFileUpload} />
+                </div>
+            </div>
+            <div className="bg-white rounded-lg shadow p-6">
+               <div className="flex items-center mb-6"><div className="bg-yellow-100 p-2 rounded-lg mr-3"><Icons.AlertTriangle className="w-6 h-6 text-yellow-600" /></div><h2 className="text-xl font-bold text-gray-900">支持的时间格式</h2></div>
+               <div className="bg-yellow-50 rounded-lg border border-yellow-200 p-4 h-[calc(100%-5rem)] overflow-y-auto"><ul className="text-sm text-yellow-700 space-y-2 list-disc list-inside">{timeFormats.map((fmt) => (<li key={fmt.id} title={fmt.pattern}><span className="font-mono">{fmt.name}</span></li>))}<li className="pt-2 border-t border-yellow-200 mt-2 text-yellow-600 italic">注：支持括号内的备注信息</li></ul></div>
+            </div>
+          </div>
+        );
+      };
+
+      const IssueSidebar = ({ events, locations, onFixSerial, onAddLocationToLibrary, onAddFormatRule, onUpdateEventTime, onUpdateEventLocation, onIgnoreError, onRestoreError, selection, onSelectIssue }) => {
+        const [viewMode, setViewMode] = useState('pending');
+        const [editingTimeId, setEditingTimeId] = useState(null);
+        const [tempTimeVal, setTempTimeVal] = useState('');
+        const [highlightId, setHighlightId] = useState(null);
+        
+        const pendingSerialIssues = events.filter(e => e.serialNo !== String(events.indexOf(e) + 1) && !e.ignoredErrors?.includes('serial'));
+        const pendingTimeIssues = events.filter(e => !e.isTimeValid && !e.ignoredErrors?.includes('time'));
+        const pendingLocationIssues = events.filter(e => !e.isLocationValid && !e.ignoredErrors?.includes('location'));
+        const uniqueInvalidLocations = Array.from(new Set(pendingLocationIssues.map(e => e.location))).filter(l => !!l);
+        const ignoredSerialIssues = events.filter(e => e.serialNo !== String(events.indexOf(e) + 1) && e.ignoredErrors?.includes('serial'));
+        const ignoredTimeIssues = events.filter(e => !e.isTimeValid && e.ignoredErrors?.includes('time'));
+        const ignoredLocationIssues = events.filter(e => !e.isLocationValid && e.ignoredErrors?.includes('location'));
+        const pendingCount = (pendingSerialIssues.length > 0 ? 1 : 0) + pendingTimeIssues.length + uniqueInvalidLocations.length;
+        const ignoredCount = (ignoredSerialIssues.length > 0 ? 1 : 0) + ignoredTimeIssues.length + ignoredLocationIssues.length;
+
+        useEffect(() => {
+          if (selection?.source === 'table' && selection.id) {
+            const event = events.find(e => e.id === selection.id);
+            if (!event) return;
+            let targetElementId = '';
+            const hasTimeError = !event.isTimeValid && !event.ignoredErrors?.includes('time');
+            const hasLocError = !event.isLocationValid && !event.ignoredErrors?.includes('location');
+            const hasSerialError = event.serialNo !== String(events.indexOf(event) + 1) && !event.ignoredErrors?.includes('serial');
+            if (hasTimeError || hasLocError || hasSerialError) setViewMode('pending');
+            if (selection.field === 'time' && hasTimeError) targetElementId = `issue-time-card-${event.id}`;
+            else if (selection.field === 'serial' && hasSerialError) targetElementId = 'issue-serial-group';
+            else if (hasTimeError) targetElementId = `issue-time-card-${event.id}`;
+            
+            setTimeout(() => {
+              let el = targetElementId ? document.getElementById(targetElementId) : null;
+              if (!el && (hasLocError && (selection.field === 'location' || !targetElementId))) {
+                 el = document.querySelector(`[data-loc-card="${event.location.replace(/"/g, '\\"')}"]`);
+              }
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const hlId = targetElementId || event.location;
+                setHighlightId(hlId); setTimeout(() => setHighlightId(null), 2000);
+              }
+            }, 100);
+          }
+        }, [selection, events]);
+
+        if (pendingCount === 0 && ignoredCount === 0) return null;
+        const handleStartEditTime = (id, current) => { setEditingTimeId(id); setTempTimeVal(current); };
+        const handleSaveTime = (id) => { onUpdateEventTime(id, tempTimeVal); setEditingTimeId(null); };
+        const handleAddFormatRule = (timeStr) => {
+            try {
+              const pattern = generateRegexFromTime(timeStr);
+              const cleanStr = timeStr.replace(/(\(.*?\)|（.*?）)/g, '').trim();
+              if (window.confirm(`是否将格式 "${cleanStr}"\n添加到合法规则库?`)) onAddFormatRule(`自定义格式: ${cleanStr}`, pattern);
+            } catch (e) { alert("无法生成规则"); }
+        };
+
+        return (
+          <div className="w-[450px] bg-white border-l border-gray-200 flex flex-col h-full sticky top-20 overflow-y-auto shadow-lg rounded-l-xl transition-all duration-300">
+            <div className="flex border-b border-gray-200 sticky top-0 bg-white z-10">
+               <button className={`flex-1 py-3 text-sm font-medium text-center transition-colors ${viewMode === 'pending' ? 'text-red-600 border-b-2 border-red-600 bg-red-50' : 'text-gray-500 hover:bg-gray-50'}`} onClick={() => setViewMode('pending')}>待处理 ({pendingCount})</button>
+               <button className={`flex-1 py-3 text-sm font-medium text-center transition-colors ${viewMode === 'ignored' ? 'text-gray-800 border-b-2 border-gray-600 bg-gray-100' : 'text-gray-500 hover:bg-gray-50'}`} onClick={() => setViewMode('ignored')}>已忽略 ({ignoredCount})</button>
+            </div>
+            <div className="p-4 space-y-6">
+              {viewMode === 'pending' && (
+                <>
+                  {pendingCount === 0 && <div className="text-center py-10 text-gray-500 text-sm"><Icons.Check className="w-8 h-8 mx-auto mb-2 text-green-500" />所有问题已处理</div>}
+                  {pendingSerialIssues.length > 0 && (
+                    <div id="issue-serial-group" onClick={() => onSelectIssue?.(pendingSerialIssues[0].id, 'sidebar', 'serial')} className={`bg-white rounded-lg border border-gray-200 shadow-sm p-4 relative group cursor-pointer ${highlightId === 'issue-serial-group' ? 'ring-2 ring-orange-400 bg-orange-50' : ''}`}>
+                      <div className="flex items-center mb-3 text-orange-600 justify-between"><div className="flex items-center"><Icons.ListOrdered className="w-5 h-5 mr-2" /><h4 className="font-bold text-base">序号不连续</h4></div><button onClick={(e) => { e.stopPropagation(); pendingSerialIssues.forEach(e => onIgnoreError(e.id, 'serial')); }} className="text-xs text-gray-500 underline">全部忽略</button></div>
+                      <p className="text-sm text-gray-600 mb-4">检测到 {pendingSerialIssues.length} 个序号不匹配。</p>
+                      <button onClick={(e) => { e.stopPropagation(); onFixSerial(); }} className="w-full flex items-center justify-center px-4 py-2 bg-orange-50 text-orange-700 text-sm font-semibold rounded-md border border-orange-200 hover:bg-orange-100"><Icons.Wand2 className="w-4 h-4 mr-2" />一键重排序号</button>
+                    </div>
+                  )}
+                  {uniqueInvalidLocations.length > 0 && (
+                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+                      <div className="flex items-center justify-between mb-3 text-red-600"><div className="flex items-center"><Icons.MapPin className="w-5 h-5 mr-2" /><h4 className="font-bold text-base">未知地点 ({uniqueInvalidLocations.length})</h4></div><button onClick={() => uniqueInvalidLocations.forEach(loc => onAddLocationToLibrary(loc))} className="text-xs text-blue-600 underline">全部入库</button></div>
+                      <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                        {uniqueInvalidLocations.map((loc, idx) => {
+                          const recommendation = getRecommendedLocation(loc, locations);
+                          const affectedEvents = pendingLocationIssues.filter(e => e.location === loc);
+                          return (
+                            <div key={idx} data-loc-card={loc} onClick={() => affectedEvents.length > 0 && onSelectIssue?.(affectedEvents[0].id, 'sidebar', 'location')} className={`bg-gray-50 p-3 rounded-md text-sm border border-gray-100 shadow-sm cursor-pointer ${highlightId === loc ? 'ring-2 ring-blue-400 bg-blue-50' : ''}`}>
+                              <div className="flex justify-between items-start gap-3 mb-2"><span className="font-bold text-gray-800 break-words flex-1 leading-snug">{loc}</span><div className="flex flex-col gap-2 shrink-0"><button onClick={(e) => { e.stopPropagation(); onAddLocationToLibrary(loc); }} className="px-2 py-1.5 rounded text-xs font-medium text-blue-700 bg-blue-100 border border-blue-200 w-16"><Icons.Plus className="w-3.5 h-3.5 mr-1 inline"/>入库</button><button onClick={(e) => { e.stopPropagation(); affectedEvents.forEach(e => onIgnoreError(e.id, 'location')); }} className="px-2 py-1.5 rounded text-xs font-medium text-gray-700 bg-white border border-gray-300 w-16"><Icons.EyeOff className="w-3.5 h-3.5 mr-1 inline"/>忽略</button></div></div>
+                              {recommendation && <div className="mt-2 flex items-center justify-between bg-yellow-50 p-2 rounded border border-yellow-100"><div className="flex items-center text-yellow-800 text-xs"><Icons.Lightbulb className="w-3.5 h-3.5 mr-1.5" />建议: {recommendation}</div><button onClick={(e) => { e.stopPropagation(); affectedEvents.forEach(evt => onUpdateEventLocation(evt.id, recommendation)); }} className="text-yellow-700 text-xs font-bold underline">修改</button></div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {pendingTimeIssues.length > 0 && (
+                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+                      <div className="flex items-center mb-3 text-red-600"><Icons.Clock className="w-5 h-5 mr-2" /><h4 className="font-bold text-base">时间错误 ({pendingTimeIssues.length})</h4></div>
+                      <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+                        {pendingTimeIssues.map((item) => {
+                          const recommendation = getRecommendedTime(item.time);
+                          const isHighlighted = highlightId === `issue-time-card-${item.id}`;
+                          const canAddRule = (item.validationMessage && item.validationMessage.includes("格式")) || !item.validationMessage;
+                          return (
+                            <div key={item.id} id={`issue-time-card-${item.id}`} onClick={() => onSelectIssue?.(item.id, 'sidebar', 'time')} className={`bg-gray-50 p-3 rounded-md border border-gray-100 shadow-sm cursor-pointer ${isHighlighted ? 'ring-2 ring-red-400 bg-red-50' : ''}`}>
+                              <div className="flex justify-between items-start mb-2"><div className="flex flex-col flex-1 mr-2"><span className="text-sm font-bold text-gray-800 leading-snug">{item.name}</span><span className="text-xs text-gray-400 mt-0.5">序号 #{item.serialNo}</span></div></div>
+                              <div className="flex items-center gap-2">
+                                 {editingTimeId === item.id ? (
+                                    <div className="flex gap-1 flex-1"><input autoFocus type="text" onClick={(e) => e.stopPropagation()} className="flex-1 text-xs border border-blue-300 rounded px-2 py-1.5 outline-none bg-white" value={tempTimeVal} onChange={(e) => setTempTimeVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSaveTime(item.id)} /><button onClick={(e) => { e.stopPropagation(); handleSaveTime(item.id); }} className="bg-green-100 text-green-700 px-2 py-1 rounded border border-green-200"><Icons.Check className="w-4 h-4" /></button></div>
+                                  ) : (
+                                    <div className="flex-1 text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded cursor-pointer border border-red-100 group h-9 flex items-center justify-between" onClick={(e) => { e.stopPropagation(); handleStartEditTime(item.id, item.time); }} title="点击修改"><span className="truncate">{item.time}</span><Icons.Wand2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-red-400" /></div>
+                                  )}
+                                  <div className="flex gap-2 shrink-0">
+                                      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (canAddRule) handleAddFormatRule(item.time); }} className={`px-3 py-1.5 rounded text-xs font-medium flex items-center shadow-sm h-9 ${canAddRule ? "text-blue-700 bg-blue-100 border border-blue-200" : "text-gray-400 bg-gray-100 cursor-not-allowed border border-gray-200"}`}><Icons.FilePlus className="w-3.5 h-3.5 mr-1" />入库</button>
+                                      <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); onIgnoreError(item.id, 'time'); }} className="px-3 py-1.5 rounded text-xs font-medium text-gray-700 bg-white border border-gray-300 h-9 flex items-center"><Icons.EyeOff className="w-3.5 h-3.5 mr-1"/>忽略</button>
+                                  </div>
+                              </div>
+                              {item.validationMessage && <div className="mt-1.5 text-xs text-red-500 flex items-start"><Icons.AlertCircle className="w-3 h-3 mr-1 mt-0.5" /><span>{item.validationMessage}</span></div>}
+                              {recommendation && <div className="mt-2 flex items-center justify-between bg-yellow-50 p-2 rounded border border-yellow-100"><div className="flex items-center text-yellow-800 text-xs"><Icons.Lightbulb className="w-3.5 h-3.5 mr-1.5" />建议: {recommendation}</div><button onClick={(e) => { e.stopPropagation(); onUpdateEventTime(item.id, recommendation); }} className="text-yellow-700 text-xs font-bold underline">修改</button></div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+              {viewMode === 'ignored' && (
+                  <div className="space-y-4">
+                       {ignoredCount === 0 && <div className="text-center py-10 text-gray-500 text-sm">暂无忽略的错误</div>}
+                       {ignoredSerialIssues.length > 0 && <div className="bg-gray-50 rounded-lg p-3 border border-gray-200"><div className="flex justify-between items-center text-sm font-medium text-gray-700 mb-2"><span>序号错误 ({ignoredSerialIssues.length})</span><button onClick={() => ignoredSerialIssues.forEach(e => onRestoreError(e.id, 'serial'))} className="text-blue-600 text-xs flex items-center"><Icons.RotateCcw className="w-3 h-3 mr-1"/>恢复</button></div></div>}
+                       {ignoredLocationIssues.length > 0 && <div className="bg-gray-50 rounded-lg p-3 border border-gray-200"><h5 className="text-sm font-medium text-gray-700 mb-2">地点错误 ({ignoredLocationIssues.length})</h5><div className="space-y-2">{ignoredLocationIssues.map(e => (<div key={e.id} className="flex justify-between items-center text-xs bg-white p-2 rounded border border-gray-100"><span className="truncate flex-1">{e.location}</span><button onClick={() => onRestoreError(e.id, 'location')} className="text-blue-600 ml-2"><Icons.RotateCcw className="w-3 h-3"/></button></div>))}</div></div>}
+                       {ignoredTimeIssues.length > 0 && <div className="bg-gray-50 rounded-lg p-3 border border-gray-200"><h5 className="text-sm font-medium text-gray-700 mb-2">时间错误 ({ignoredTimeIssues.length})</h5><div className="space-y-2">{ignoredTimeIssues.map(e => (<div key={e.id} className="flex justify-between items-center text-xs bg-white p-2 rounded border border-gray-100"><div className="flex flex-col truncate flex-1"><span className="font-medium">{e.name}</span><span className="text-gray-500">{e.time}</span></div><button onClick={() => onRestoreError(e.id, 'time')} className="text-blue-600 ml-2"><Icons.RotateCcw className="w-3 h-3"/></button></div>))}</div></div>}
+                  </div>
+              )}
+            </div>
+          </div>
+        );
+      };
+
+      // --- MAIN APP ---
+
+      const App = () => {
+        const [view, setView] = useState('list');
+        const [events, setEvents] = useState([]);
+        const [locations, setLocations] = useState([]);
+        const [timeFormats, setTimeFormats] = useState(INITIAL_TIME_FORMATS);
+        const [isImportPanelOpen, setIsImportPanelOpen] = useState(true);
+        const [selection, setSelection] = useState(null);
+
+        useEffect(() => {
+          if (locations.length === 0) {
+            const initialData = [
+              "文化宫四楼文化交流中心", "线上征集", "文化宫球馆", "文化宫围棋天地", "文化宫职工体适能健身馆",
+              "南宁市工人文化宫微信公众号", "文化宫三楼多功能厅", "交通银行金融中心", "文化宫一楼大堂报名点",
+              "南宁市红色工运教育体验馆", "南宁市职工AI科技教育体验馆", "各基层工会", "南宁市各中小学", "文化宫职工广场"
+            ];
+            setLocations(initialData.map(name => ({ id: Math.random().toString(36).substr(2, 9), name })));
+          }
+        }, []);
+
+        useEffect(() => {
+          setEvents(prevEvents => prevEvents.map(evt => {
+             const isLocationValid = locations.some(loc => loc.name === evt.location.trim());
+             const timeValidation = validateTimeFormat(evt.time, timeFormats);
+             return { ...evt, isLocationValid, isTimeValid: timeValidation.isValid, validationMessage: timeValidation.message };
+          }));
+        }, [locations, timeFormats]);
+
+        const addTimeFormat = (name, pattern) => setTimeFormats(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), name, pattern }]);
+        const removeTimeFormat = (id) => setTimeFormats(prev => prev.filter(t => t.id !== id));
+        const handleUpdateEvent = (id, field, value) => {
+           setEvents(prev => prev.map(evt => {
+              if (evt.id !== id) return evt;
+              const updated = { ...evt, [field]: value };
+              if (field === 'time') {
+                  const result = validateTimeFormat(value, timeFormats);
+                  updated.isTimeValid = result.isValid;
+                  updated.validationMessage = result.message;
+              }
+              if (field === 'location') updated.isLocationValid = locations.some(l => l.name === value.trim());
+              return updated;
+           }));
+        };
+        const updateEventTime = (id, newTime) => handleUpdateEvent(id, 'time', newTime);
+        const updateEventLocation = (id, newLocation) => handleUpdateEvent(id, 'location', newLocation);
+        const fixSerialNumbers = () => setEvents(prev => prev.map((evt, index) => ({ ...evt, serialNo: String(index + 1) })));
+        const handleIgnoreError = (id, type) => {
+            setEvents(prev => prev.map(evt => {
+                if (evt.id !== id) return evt;
+                const currentIgnored = evt.ignoredErrors || [];
+                if (currentIgnored.includes(type)) return evt;
+                return { ...evt, ignoredErrors: [...currentIgnored, type] };
+            }));
+        };
+        const handleRestoreError = (id, type) => {
+            setEvents(prev => prev.map(evt => {
+                if (evt.id !== id) return evt;
+                const currentIgnored = evt.ignoredErrors || [];
+                return { ...evt, ignoredErrors: currentIgnored.filter(t => t !== type) };
+            }));
+        };
+        const addLocation = (name) => {
+          if (locations.some(l => l.name === name)) return;
+          setLocations(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), name }]);
+        };
+        const removeLocation = (id) => setLocations(prev => prev.filter(l => l.id !== id));
+        const handleExcelImport = (rawData) => {
+          if (events.length > 0 && !window.confirm("当前页面存在已有数据，继续导入将删除已有数据")) return;
+          const importedEvents = [];
+          let bestHeaderRowIndex = -1, maxScore = 0;
+          for (let i = 0; i < Math.min(rawData.length, 20); i++) {
+            const row = rawData[i];
+            if (!Array.isArray(row)) continue;
+            let score = 0;
+            const rowStr = row.map(c => String(c).trim().replace(/\s+/g, ''));
+            if (rowStr.some(s => s.includes('序号'))) score += 10;
+            if (rowStr.some(s => (s.includes('名称') || s.includes('活动')))) score += 10;
+            if (rowStr.some(s => s.includes('时间') || s.includes('日期'))) score += 10;
+            if (rowStr.some(s => s.includes('地点') || s.includes('地址'))) score += 10;
+            if (score > maxScore) { maxScore = score; bestHeaderRowIndex = i; }
+          }
+          let colMap = { serial: -1, name: -1, time: -1, location: -1 };
+          if (bestHeaderRowIndex !== -1) {
+             const row = rawData[bestHeaderRowIndex];
+             const rowStr = row.map((c) => String(c).trim().replace(/\s+/g, ''));
+             rowStr.forEach((cell, idx) => {
+                if (/序号/.test(cell)) colMap.serial = idx;
+                if (/名称|活动|内容|项目/.test(cell) && !/时间|日期|地点/.test(cell)) colMap.name = idx;
+                if (/时间|日期/.test(cell)) colMap.time = idx;
+                if (/地点|地址|场馆/.test(cell)) colMap.location = idx;
+             });
+             if (colMap.name !== -1) {
+                if (colMap.time === -1) colMap.time = colMap.name + 1;
+                if (colMap.location === -1) colMap.location = colMap.name + 2;
+             }
+          } else {
+             let looksLikeSerial = false;
+             if (rawData.length > 1 && !isNaN(Number(rawData[0][0]))) looksLikeSerial = true;
+             if (looksLikeSerial) colMap = { serial: 0, name: 1, time: 2, location: 3 };
+             else colMap = { serial: -1, name: 0, time: 1, location: 2 };
+          }
+          const startRow = bestHeaderRowIndex === -1 ? 0 : bestHeaderRowIndex + 1;
+          for (let i = startRow; i < rawData.length; i++) {
+              const row = rawData[i];
+              if (!Array.isArray(row)) continue;
+              const getVal = (idx) => idx >= 0 && idx < row.length ? String(row[idx] || '').trim() : '';
+              const getTime = (idx) => {
+                  if (idx < 0 || idx >= row.length) return '';
+                  let val = row[idx];
+                  if (typeof val === 'number' && val > 30000) {
+                       const dateObj = new Date((val - 25569) * 86400 * 1000);
+                       if (!isNaN(dateObj.getTime())) val = `${dateObj.getUTCMonth() + 1}月${dateObj.getUTCDate()}日`;
+                  }
+                  return String(val || '').trim();
+              };
+              const serialNo = getVal(colMap.serial);
+              const name = getVal(colMap.name);
+              const time = getTime(colMap.time);
+              const location = getVal(colMap.location);
+              if (name) {
+                  importedEvents.push({ 
+                    id: Math.random().toString(36).substr(2, 9),
+                    serialNo: serialNo || String(importedEvents.length + 1), 
+                    name, time, location,
+                    isLocationValid: locations.some(loc => loc.name === location.trim()),
+                    isTimeValid: validateTimeFormat(time, timeFormats).isValid,
+                    validationMessage: validateTimeFormat(time, timeFormats).message,
+                    ignoredErrors: []
+                  });
+              }
+          }
+          if (importedEvents.length > 0) { setEvents(importedEvents); alert(`成功导入 ${importedEvents.length} 条数据`); } else { alert('未识别到有效数据'); }
+        };
+        const exportExcel = () => {
+          if (events.length === 0) { alert('没有数据可导出'); return; }
+          const ws = XLSX.utils.json_to_sheet(events.map(e => ({ '序号': e.serialNo, '活动名称': e.name, '时间': e.time, '地点': e.location })));
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "活动列表");
+          XLSX.writeFile(wb, "校验后活动数据.xlsx");
+        };
+        const hasIssues = events.some(e => {
+            const serialWrong = e.serialNo !== String(events.indexOf(e) + 1);
+            const timeWrong = !e.isTimeValid;
+            const locWrong = !e.isLocationValid;
+            return serialWrong || timeWrong || locWrong;
+        });
+
+        return (
+          <div className="min-h-screen bg-gray-50 flex flex-col">
+            <header className="bg-white shadow-sm z-20 sticky top-0">
+              <div className="max-w-[95%] mx-auto px-4 sm:px-6 lg:px-8">
+                <div className="flex justify-between h-16">
+                  <div className="flex items-center"><Icons.LayoutDashboard className="w-8 h-8 text-indigo-600" /><span className="ml-2 text-xl font-bold text-gray-900">活动数据校验助手 (离线版)</span></div>
+                  <nav className="flex space-x-4 items-center">
+                    <button onClick={() => setView('list')} className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${view === 'list' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}>活动管理</button>
+                    <button onClick={() => setView('library')} className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${view === 'library' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}>地址库</button>
+                    <button onClick={() => setView('time-formats')} className={`px-3 py-2 rounded-md text-sm font-medium transition-colors flex items-center ${view === 'time-formats' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}><Icons.Clock className="w-4 h-4 mr-1.5" />时间格式</button>
+                  </nav>
+                </div>
+              </div>
+            </header>
+            <main className="flex-1 max-w-[95%] w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              {view === 'list' ? (
+                <div className="flex gap-6 items-start">
+                  <div className={`flex-1 min-w-0 transition-all duration-300 ${hasIssues ? 'max-w-[calc(100%-30rem)]' : 'w-full'}`}>
+                    <div className="space-y-8">
+                      <div className="flex justify-between items-center">
+                          <button onClick={() => setIsImportPanelOpen(!isImportPanelOpen)} className="flex items-center text-sm font-medium text-gray-700 bg-white px-3 py-2 rounded-md border border-gray-300 shadow-sm hover:bg-gray-50">{isImportPanelOpen ? <>收起导入面板 <Icons.ChevronUp className="w-4 h-4 ml-2" /></> : <>展开导入面板 <Icons.ChevronDown className="w-4 h-4 ml-2" /></>}</button>
+                          <button onClick={exportExcel} className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md shadow-sm text-sm font-medium hover:bg-green-700 focus:outline-none"><Icons.Download className="w-4 h-4 mr-2" />导出 Excel</button>
+                      </div>
+                      {isImportPanelOpen && <ImportPanel timeFormats={timeFormats} onImportExcel={handleExcelImport} />}
+                      <div className="border-t border-gray-200 pt-8">
+                        <EventList events={events} onDelete={(id) => setEvents(prev => prev.filter(e => e.id !== id))} onClearAll={() => { if (confirm('确定清空所有数据吗?')) setEvents([]); }} onUpdateEvent={handleUpdateEvent} selection={selection} onSelectRow={(id, source, field) => setSelection({ id, source, field })} />
+                      </div>
+                    </div>
+                  </div>
+                  {hasIssues && <div className="flex-shrink-0 sticky top-24"><IssueSidebar events={events} locations={locations} onFixSerial={fixSerialNumbers} onAddLocationToLibrary={addLocation} onAddFormatRule={addTimeFormat} onUpdateEventTime={updateEventTime} onUpdateEventLocation={updateEventLocation} onIgnoreError={handleIgnoreError} onRestoreError={handleRestoreError} selection={selection} onSelectIssue={(id, source, field) => setSelection({ id, source, field })} /></div>}
+                </div>
+              ) : view === 'library' ? (
+                <AddressLibrary locations={locations} onAddLocation={addLocation} onRemoveLocation={removeLocation} />
+              ) : (
+                <TimeFormatLibrary formats={timeFormats} onAddFormat={addTimeFormat} onRemoveFormat={removeTimeFormat} />
+              )}
+            </main>
+            <footer className="bg-white border-t border-gray-200 py-4 mt-auto">
+               <div className="max-w-[95%] mx-auto px-4 text-center text-sm text-gray-500">&copy; {new Date().getFullYear()} Event Validator. 红色高亮表示格式错误或未知地址。</div>
+            </footer>
+          </div>
+        );
+      };
+
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+</body>
 </html>
